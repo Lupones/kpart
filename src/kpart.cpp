@@ -378,7 +378,7 @@ void generate_profiling_plan(int cacheCapacity) {
     int p = plan[s];           // e.g. 5 (ways being profiled for target app)
     int r = cacheCapacity - p; // e.g. 1 (remaining ways for rest of apps)
 
-	printf("sliceIdx: %d\n",sliceIdx);
+	//printf("sliceIdx: %d\n",sliceIdx);
     row = 0;
     idx = 0;
     for (int i = 0; i < p; i++) {
