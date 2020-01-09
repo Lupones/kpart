@@ -22,7 +22,7 @@ profilingPeriod=10 #profile co-running applications every this much B cycles
 # processStr1="$numPhases ${BUILD_DIR}/401.bzip2 input.source 64"
 # processStr1="$numPhases /bin/ls"
 
-processStr1="$numPhases - 0 ${APP_DIR} ${INPUT}"
+processStr1="$numPhases - 0 $APP_DIR $INPUT"
 processStr2="$numPhases - 1 $APP_DIR $INPUT"
 processStr3="$numPhases - 2 $APP_DIR $INPUT"
 processStr4="$numPhases - 3 $APP_DIR $INPUT"
@@ -35,7 +35,7 @@ echo "$perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod -- $proces
 
 # Pin KPart thread to core 15 (hyperthreading enabled)
 STARTTIME=$(($(date +%s%N)/1000000))
-numactl -C 15 ./../src/kpart_cmt $perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod \
+numactl -C 2 ./../src/kpart $perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod \
     -- $processStr1 \
     -- $processStr2 \
     -- $processStr3 \
