@@ -85,7 +85,7 @@ int numProcesses = 0; //updated dynamically when processes are launched
 int procIdxProfiled_global =
     0;                //starts with process 0, up to (computed) numProcesses
 
-int numWaysToSample = 7;
+int numWaysToSample = 12;
 arma::cube allAppsCacheAssignments(2, CACHE_WAYS, numWaysToSample, fill::zeros);
 arma::mat currentlySampling = zeros<arma::mat>(NUM_CORES, 2);
 arma::mat sampledMRCs = zeros<arma::mat>(CACHE_WAYS, NUM_CORES);
@@ -185,6 +185,7 @@ void updateMemTraffic(ProcessInfo &pinfo) {
   }
 
   pinfo.memTrafficLast = memTraffic;
+  //printf("Memory traffic: %ld\n",memTraffic);
 }
 
 void updateCacheOccupancy(ProcessInfo &pinfo) {
@@ -243,8 +244,11 @@ void read_counters(ProcessInfo &pinfo) {
 #endif
 }
 
+struct timeval endL;
+struct timeval startL;
 void dump_counters(ProcessInfo &pinfo) {
   int i;
+  double mtime, seconds, useconds;
   read_counters(pinfo);
 
   if (prettyPrint) {
@@ -259,6 +263,14 @@ void dump_counters(ProcessInfo &pinfo) {
             pinfo.avgCacheOccupancy);
 #endif
   } else {
+	gettimeofday(&endL, 0);
+	seconds  = endL.tv_sec  - startL.tv_sec;
+    useconds = endL.tv_usec - startL.tv_usec;
+
+    mtime = ((seconds) * 1000 + useconds/1000.0);
+	startL = endL;
+
+	fprintf(pinfo.logFd, "%.3f ", mtime);
     for (i = 0; i < numEvents - 1; i++)
       fprintf(pinfo.logFd, "%ld ", pinfo.values[i]);
 
@@ -294,6 +306,9 @@ void generate_profiling_plan(int cacheCapacity) {
   switch (cacheCapacity) {
   // Modify "plan" if you want DynaWay to sample cache sizes differently
   // Add cases if more/different cache capacities are passible
+  case 20:
+    plan = {19, 19, 18, 16, 14, 12, 10, 8, 6, 4, 2, 1};
+	break;
   case 12:
     plan = { 11, 11, 8, 6, 4, 2, 1 };
     break;
@@ -363,6 +378,7 @@ void generate_profiling_plan(int cacheCapacity) {
     int p = plan[s];           // e.g. 5 (ways being profiled for target app)
     int r = cacheCapacity - p; // e.g. 1 (remaining ways for rest of apps)
 
+	printf("sliceIdx: %d\n",sliceIdx);
     row = 0;
     idx = 0;
     for (int i = 0; i < p; i++) {
@@ -393,9 +409,10 @@ void generate_profiling_plan(int cacheCapacity) {
 
   // workaround CAT bug with buckets 10,11
   A = { { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
-        { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } }; // 0:11, 1:1
-  allAppsCacheAssignments.slice(0) = A;
-  allAppsCacheAssignments.slice(1) = A;
+       { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } }; // 0:11, 1:1
+
+  //allAppsCacheAssignments.slice(0) = A;
+  //allAppsCacheAssignments.slice(1) = A;
 
 }
 
@@ -427,14 +444,16 @@ int set_cacheways_to_cores(arma::mat C, int procIdxProfiled) {
     rs += " -m" + waysString;
 
     status = system(rs.c_str());
-    //if(enableLogging){ printf("[INFO] Changing cache alloc for cos %d to %s
-    //ways. Status= %d \n", cosID, waysString.c_str(), status); }
+    if(enableLogging){
+		printf("[INFO] Changing cache alloc for cos %d to %s ways. Status= %d \n", cosID, waysString.c_str(), status);
+	}
 
     if (status != 0)
       break;
 
     //Indicate that this process is now sampling "x" number of cache ways
     //currentlySampling[cosID] = numWaysBeingSampled;
+	printf("numWaysBeingSampled %d\n",numWaysBeingSampled);
     cosMap(cosID, 0) = numWaysBeingSampled;
     cosMap(cosID, 1) = 1;
     //if(enableLogging){ printf("[INFO] Indicating that COS %d is now mapped to
@@ -446,6 +465,7 @@ int set_cacheways_to_cores(arma::mat C, int procIdxProfiled) {
   std::string rs = CAT_COS_TOOL_DIR + std::to_string(procIdxProfiled) + " -s " +
                    std::to_string(cosID);
 
+  printf("%s\n",rs.c_str());
   status = system(rs.c_str());
   if (enableLogging) {
     printf("[INFO] Changing CORE %d map to COS %d. Status= %d \n",
@@ -727,7 +747,7 @@ void sigsage_handler(int n, siginfo_t *info, void *vsc) {
   ProcessInfo &pinfo = *pidMap[fd];
 
   ++pinfo.numPhases;
-  //printf("[TEST] PROC %d, PHASE %d", pinfo.pidx, pinfo.numPhases);
+  printf("[TEST] PROC %d, PHASE %d\n", pinfo.pidx, pinfo.numPhases);
   //assert(pinfo.numPhases <= pinfo.maxPhases);
 
   // --------------------------------------------------- //
@@ -955,8 +975,10 @@ void sigsage_handler(int n, siginfo_t *info, void *vsc) {
         loggingMRCFlags.zeros(); //= zeros<arma::vec>(NUM_CORES);
         sampleSlicesIdx = 0;     //Start over
         procIdxProfiled_global++;
+		printf("procIdxProfiled_global: %d\n",procIdxProfiled_global);
 
         if (procIdxProfiled_global >= numProcesses) {
+		  printf("Inside IF procIdxProfiled_global >= numProcesses");
           procIdxProfiled_global = 0;
           monitorStartFlag = false;
         }
@@ -995,17 +1017,20 @@ void sigsage_handler(int n, siginfo_t *info, void *vsc) {
   hdr = reinterpret_cast<struct perf_event_mmap_page *>(pinfo.fds[id].buf);
 
   ret = perf_read_buffer(&pinfo.fds[id], &ehdr, sizeof(ehdr));
+  // Type:
+  // ---> Normal: PERF_RECORD_SAMPLE = 9
+  // ---> Error:  PERF_RECORD_LOST = 2
+  printf("EVENT: %s | Type: %d | ID: %d\n",pinfo.fds[id].name, ehdr.type,id);
   if (ret)
     errx(1, "cannot read event header");
   if (ehdr.type != PERF_RECORD_SAMPLE) {
     errx(1, "unknown event type %d, skipping", ehdr.type);
   }
-
   //First val is a special case, need to read it regardless
   uint64_t dummy;
   ret = perf_read_buffer(&pinfo.fds[id], &dummy, sizeof(uint64_t));
   if (ret)
-    errx(1, "cannot read first value");
+	errx(1, "cannot read first value");
 
   // dump_counters reads and updates values
   dump_counters(pinfo);
@@ -1112,12 +1137,14 @@ void profile(char **argv) {
 
       for (int i = 0; i < pinfo.args.size(); ++i) {
         childArgs[i] = pinfo.args[i];
+		printf("--------> childArgs[%d]: %s\n",i,childArgs[i]);
       }
       childArgs[pinfo.args.size()] = nullptr;
 
       // Per process dirs
       std::stringstream ss;
       ss << "p" << pinfo.pidx;
+	  // Change working directory of child
       if (chdir(ss.str().c_str()) == -1) {
         err(-1, "Could not chdir");
       }
@@ -1136,6 +1163,7 @@ void profile(char **argv) {
       redirect_stream("stderr", STDERR_FILENO, O_WRONLY | O_CREAT | O_TRUNC,
                       S_IRUSR | S_IWUSR | S_IROTH | S_IWOTH);
 
+	  printf("--------> childArgs[0]: %s\n",childArgs[0]);
       execvp(childArgs[0], childArgs);
 
       err(-1, "exec failed");
@@ -1180,6 +1208,7 @@ void profile(char **argv) {
   while (true) {
     int status;
     pid_t child = waitpid(-1, &status, __WALL);
+	printf("[PROFILE] activeProcs = %d\n",activeProcs);
     if (activeProcs == 0)
       return;
     if (child == -1) {
@@ -1290,6 +1319,7 @@ void parse_cmdline(int argc, char **argv) {
 #ifdef MASTER_PROC
       if (pidx == 0) {
         pinfo.maxPhases = atoi(argv[++arg]);
+		printf("maxPhases: %d",pinfo.maxPhases);
       } else {
         ++arg; // skip over arg
         pinfo.maxPhases = std::numeric_limits<int>::max();
@@ -1330,6 +1360,7 @@ void parse_cmdline(int argc, char **argv) {
 
       }
     } else {
+		printf("argv %s\n",argv[arg]);
       processInfo.back().args.push_back(argv[arg]);
     }
   }
@@ -1355,13 +1386,13 @@ int main(int argc, char **argv) {
   // Print out header for logfile
   if (!prettyPrint) {
     for (ProcessInfo &pinfo : processInfo) {
+	  fprintf(pinfo.logFd, "TIME_ELAPSED_MS ");
       for (uint32_t i = 0; i < numEvents; i++) {
-        fprintf(pinfo.logFd, "%s | %s\n", globFds[i].name, globFds[i].name);
+        fprintf(pinfo.logFd, "%s ", globFds[i].name);
       }
 #ifdef USE_CMT
-      fprintf(pinfo.logFd, "%s | %s\n", lmbName.c_str(), lmbName.c_str());
-      fprintf(pinfo.logFd, "%s | %s\n", l3OccupName.c_str(),
-              l3OccupName.c_str());
+      fprintf(pinfo.logFd, "%s ", lmbName.c_str());
+      fprintf(pinfo.logFd, "%s \n", l3OccupName.c_str());
 #endif
     }
   }
@@ -1370,11 +1401,19 @@ int main(int argc, char **argv) {
          (logFile == "-") ? "stdout" : logFile.c_str());
 
   // Instal SIGSAGE sig handler
+  // The sigaction() system call is used to change the action taken by a process on receipt of a specific signal
+  // sigaction() returns 0 on succes
   struct sigaction act;
   memset(&act, 0, sizeof(act));
-  act.sa_sigaction = sigsage_handler;
+  act.sa_sigaction = &sigsage_handler;
   act.sa_flags = SA_SIGINFO;
-  sigaction(SIGSAGE, &act, 0);
+  int retSIG = sigaction(SIGSAGE, &act, 0);
+  if (retSIG < 0) {
+	  perror("sigaction\n");
+	  return 1;
+  } else {
+		printf("SIGACTION: %d\n",retSIG);
+  }
 
   // Ensure we kill all our children on abort
   signal(SIGSEGV, fini_handler);
@@ -1420,7 +1459,6 @@ void global_setup_counters(const char *events) {
 }
 
 void setup_counters(ProcessInfo &pinfo) {
-
   // NOTE: If processes are not pinned/CPUs are overcommitted, the 'pinned'
   // value for events (set in global_setup_counters()) might also need to be
   // changed
@@ -1438,7 +1476,7 @@ void setup_counters(ProcessInfo &pinfo) {
     pidMap[fds[i].fd] = &pinfo;
 
     if (i == 0) {
-      int buffer_pages = 1;
+      int buffer_pages = 64;
       size_t pgsz = sysconf(_SC_PAGESIZE);
       fds[i].buf = mmap(NULL, (buffer_pages + 1) * pgsz, PROT_READ | PROT_WRITE,
                         MAP_SHARED, fds[i].fd, 0);
