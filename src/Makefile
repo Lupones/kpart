@@ -1,8 +1,8 @@
 # Update LIBPFMPATH variable by making it point to location 
 # of libpfm4 library on your machine 
-LIBPFMPATH ?= ../libpfm-4.9.0
+LIBPFMPATH = /home/lupones/kpart/libpfm-4.9.0
 
-LLTOOLSPATH = ../lltools
+LLTOOLSPATH = /home/lupones/kpart/lltools
 
 CXX=g++
 CC=gcc
