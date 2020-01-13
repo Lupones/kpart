@@ -42,6 +42,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <map>
 #include <sys/prctl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -244,13 +245,16 @@ void read_counters(ProcessInfo &pinfo) {
 #endif
 }
 
-struct timeval endL;
-struct timeval startL;
+//struct timeval endL;
+//struct timeval startL;
+std::map<int,timeval> timeMap;
 void dump_counters(ProcessInfo &pinfo) {
+  struct timeval endL;
+  struct timeval startL;
   int i;
   double mtime, seconds, useconds;
   read_counters(pinfo);
-
+  printf("---> %d: Dump_counters ", pinfo.pidx);
   if (prettyPrint) {
     for (i = 0; i < numEvents; i++) {
       fprintf(pinfo.logFd, "%40s  %3d:%ld\n", pinfo.fds[i].name, pinfo.pid,
@@ -264,12 +268,15 @@ void dump_counters(ProcessInfo &pinfo) {
 #endif
   } else {
 	gettimeofday(&endL, 0);
+	startL = timeMap[pinfo.pidx];
 	seconds  = endL.tv_sec  - startL.tv_sec;
     useconds = endL.tv_usec - startL.tv_usec;
 
     mtime = ((seconds) * 1000 + useconds/1000.0);
-	startL = endL;
+	timeMap[pinfo.pidx] = endL;
+	//startL = endL;
 
+	printf("(elapsedtime: %.3f)\n",mtime);
 	fprintf(pinfo.logFd, "%.3f ", mtime);
     for (i = 0; i < numEvents - 1; i++)
       fprintf(pinfo.logFd, "%ld ", pinfo.values[i]);
@@ -1020,7 +1027,7 @@ void sigsage_handler(int n, siginfo_t *info, void *vsc) {
   // Type:
   // ---> Normal: PERF_RECORD_SAMPLE = 9
   // ---> Error:  PERF_RECORD_LOST = 2
-  printf("EVENT: %s | Type: %d | ID: %d\n",pinfo.fds[id].name, ehdr.type,id);
+  //printf("EVENT: %s | Type: %d | ID: %d\n",pinfo.fds[id].name, ehdr.type,id);
   if (ret)
     errx(1, "cannot read event header");
   if (ehdr.type != PERF_RECORD_SAMPLE) {
