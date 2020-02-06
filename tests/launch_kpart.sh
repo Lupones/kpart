@@ -59,15 +59,15 @@ while read WL; do
 	done
 	echo "Done copying!"
 
-	echo "$perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr"
+	echo "$perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr" > output.log
 
 	# Pin KPart thread to core 15 (hyperthreading enabled)
 	STARTTIME=$(($(date +%s%N)/1000000))
 
-	numactl -C 2 /home/lupones/kpart/src/kpart $perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr
+	numactl -C 2 /home/lupones/kpart/src/kpart $perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr >> output.log
 
 	ENDTIME=$(($(date +%s%N)/1000000))
-	echo "Elapsed time = $(($ENDTIME - $STARTTIME)) milliseconds."
+	echo "Elapsed time = $(($ENDTIME - $STARTTIME)) milliseconds." >> output.log
 
 	for pid in ${!appsArray[@]}; do
 		# Delete folders to store input files 
@@ -76,7 +76,7 @@ while read WL; do
 
 	cd ..
 
-done < $WORKLOADS
+done < $WORKLOADS 
 
 echo 1200000 | tee /sys/devices/system/cpu/cpufreq/policy*/scaling_min_freq > /dev/null
 
