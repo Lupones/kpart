@@ -985,7 +985,7 @@ void sigsage_handler(int n, siginfo_t *info, void *vsc) {
 		printf("procIdxProfiled_global: %d\n",procIdxProfiled_global);
 
         if (procIdxProfiled_global >= numProcesses) {
-		  printf("Inside IF procIdxProfiled_global >= numProcesses");
+		  printf("Inside IF procIdxProfiled_global >= numProcesses\n");
           procIdxProfiled_global = 0;
           monitorStartFlag = false;
         }
@@ -1059,7 +1059,13 @@ void sigsage_handler(int n, siginfo_t *info, void *vsc) {
           // ptrace(PTRACE_KILL, pinfo.pid, NULL, NULL);
         } while (waitpid(pinfo.pid, NULL, 0) != -1);
       }
-    }
+    } else {
+		struct timeval endProc;
+		gettimeofday(&endProc, 0);
+        double elapsedtime = (endProc.tv_sec - startAll.tv_sec) * 1e3 + (endProc.tv_usec - startAll.tv_usec) * 1e-3;
+        printf("[TIMECALC] total elapsed time = %.3f ms\n", elapsedtime);
+		printf("Proc %d finished! activeProcs = %d\n", pinfo.pidx, activeProcs);
+	}
   }
 }
 
@@ -1304,6 +1310,9 @@ void parse_cmdline(int argc, char **argv) {
   int profilePeriodInstrBl = atoll(argv[5]);
   profileInterval = (profilePeriodInstrBl * 1e9) / phaseLen;
 
+  printf("[KPART] Warmup: %d phases\n", warmUpInterval);
+  printf("[KPART] Profile: %d phases\n", profileInterval);
+
   invokeMonitorLen =
       warmUpInterval; //Start by invoking monitoring after a warmup period
 
@@ -1314,7 +1323,9 @@ void parse_cmdline(int argc, char **argv) {
       processInfo.push_back(ProcessInfo());
       ProcessInfo &pinfo = processInfo.back();
       int pidx = numProcesses++;
+	  printf("I am process X %d\n",pidx);
       pinfo.pidx = pidx;
+	  gettimeofday(&timeMap[pinfo.pidx], 0);
 #ifdef USE_CMT
       pinfo.rmid = pidx;
 #endif
@@ -1326,13 +1337,14 @@ void parse_cmdline(int argc, char **argv) {
 #ifdef MASTER_PROC
       if (pidx == 0) {
         pinfo.maxPhases = atoi(argv[++arg]);
-		printf("maxPhases: %d",pinfo.maxPhases);
+		printf("MASTER maxPhases: %d\n",pinfo.maxPhases);
       } else {
         ++arg; // skip over arg
         pinfo.maxPhases = std::numeric_limits<int>::max();
       }
 #else
       pinfo.maxPhases = atoi(argv[++arg]);
+      printf("maxPhases: %d\n",pinfo.maxPhases);
 #endif
       pinfo.input = argv[++arg];
       pinfo.cores = parse_core_list(argv[++arg]);
@@ -1413,13 +1425,12 @@ int main(int argc, char **argv) {
   struct sigaction act;
   memset(&act, 0, sizeof(act));
   act.sa_sigaction = &sigsage_handler;
+  // The SA_SIGINFO flag tells sigaction() to use the sa_sigaction field, not sa_handler
   act.sa_flags = SA_SIGINFO;
   int retSIG = sigaction(SIGSAGE, &act, 0);
   if (retSIG < 0) {
 	  perror("sigaction\n");
 	  return 1;
-  } else {
-		printf("SIGACTION: %d\n",retSIG);
   }
 
   // Ensure we kill all our children on abort
@@ -1482,7 +1493,7 @@ void setup_counters(ProcessInfo &pinfo) {
     assert(pidMap.find(fds[i].fd) == pidMap.end());
     pidMap[fds[i].fd] = &pinfo;
 
-    if (i == 0) {
+    if (i == 0) { // set interrupt for INSTRUCTIONS
       int buffer_pages = 64;
       size_t pgsz = sysconf(_SC_PAGESIZE);
       fds[i].buf = mmap(NULL, (buffer_pages + 1) * pgsz, PROT_READ | PROT_WRITE,
