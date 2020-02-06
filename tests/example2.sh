@@ -1,5 +1,7 @@
 #!/bin/bash
 
+function join_by { local IFS="$1"; shift; echo "$*"; }
+
 ## APPS Files ##
 declare -A appSKEL=(["bzip2"]="/home/benchmarks/spec2006/401.bzip2/data-ref/*" ["calculix"]="/home/benchmarks/spec2006/454.calculix/data-ref/*" ["povray_r"]="/home/benchmarks/spec2017/benchspec/CPU/511.povray_r/data/refrate/input/* /home/benchmarks/spec2017/benchspec/CPU/511.povray_r/data/all/input/*" ["cam4_r"]="/home/benchmarks/spec2017/benchspec/CPU/527.cam4_r/data/refrate/input/* /home/benchmarks/spec2017/benchspec/CPU/527.cam4_r/data/all/input/*" ["h264ref"]="/home/benchmarks/spec2006/464.h264ref/data-ref/*" ["libquantum"]="/home/benchmarks/spec2006/462.libquantum/data-ref/*" ["namd"]="/home/benchmarks/spec2006/444.namd/data-ref/*" ["povray"]="/home/benchmarks/spec2006/453.povray/data-ref/*" ["omnetpp_r"]="/home/benchmarks/spec2017/benchspec/CPU/520.omnetpp_r/data/refrate/input/* /home/benchmarks/spec2017/benchspec/CPU/520.omnetpp_r/data/all/input/*")
 
@@ -15,44 +17,66 @@ perfCounters='INST_RETIRED,LONGEST_LAT_CACHE:REFERENCE,UNHALTED_CORE_CYCLES'
 
 # KPart parameters:
 phaseLen=20000000  #sample HW counters every 20M instr.
-numPhases=1000 #measure the first 2000 phases in each running program
+numPhases=10000  # all applications complete at leaste 200 B instructions
 logFile="perfCtrs" #prefix for log file where hardware counters are stored
-warmupPeriod=10  #start profiling after this init period (unit: B cycles)
-profilingPeriod=10 #profile co-running applications every this much B cycles
+warmupPeriod=60  # 60B instructions ---> start profiling after this init period (unit: B cycles)
+profilingPeriod=40 #40B cycles ----> profile co-running applications every this much B cycles
 
+# Enable prefetchers
+wrmsr -a 0x1A4 0x0
 
-# WORKLOAD TO EXECUTE
-declare -a appsArray=("povray_r" "cam4_r" "calculix" "h264ref" "libquantum" "namd" "povray" "omnetpp_r")
-processStr=""
+# Set performance governor
+echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor > /dev/null
+echo 2200000 | tee /sys/devices/system/cpu/cpufreq/policy*/scaling_min_freq > /dev/null
 
-echo "Creating folders and copying files..."
-for pid in ${!appsArray[@]}; do
-
-	mkdir -p "p"$pid
+WORKLOADS=$1
+while read WL; do
+	WL=$(echo $WL | tr '\-[],' " ")
+	echo $WL
 	
-	# Create folders to store input files 
-	declare -a skel=(${appSKEL[${appsArray[pid]}]})
-	for dir in ${skel[@]}; do
-		cp -r $dir "p"$pid
+	WLfolder=$(join_by - ${WL[@]})
+	mkdir $WLfolder
+	
+	cd $WLfolder
+
+	# WORKLOAD TO EXECUTE
+	declare -a appsArray=($WL)
+	processStr=""
+
+	echo "Creating folders and copying files..."
+	for pid in ${!appsArray[@]}; do
+
+		mkdir -p "p"$pid
+		
+		# Create folders to store input files 
+		declare -a skel=(${appSKEL[${appsArray[pid]}]})
+		for dir in ${skel[@]}; do
+			cp -r $dir "p"$pid
+		done
+
+		processStr=$processStr" -- "$numPhases" - "$pid" "${appDIR[${appsArray[pid]}]}" "${appINPUT[${appsArray[pid]}]}
+		
+	done
+	echo "Done copying!"
+
+	echo "$perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr"
+
+	# Pin KPart thread to core 15 (hyperthreading enabled)
+	STARTTIME=$(($(date +%s%N)/1000000))
+
+	numactl -C 2 /home/lupones/kpart/src/kpart $perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr
+
+	ENDTIME=$(($(date +%s%N)/1000000))
+	echo "Elapsed time = $(($ENDTIME - $STARTTIME)) milliseconds."
+
+	for pid in ${!appsArray[@]}; do
+		# Delete folders to store input files 
+		rm -r "p"$pid
 	done
 
-	processStr=$processStr" -- "$numPhases" - "$pid" "${appDIR[${appsArray[pid]}]}" "${appINPUT[${appsArray[pid]}]}
-	
-done
-echo "Done copying!"
+	cd ..
 
-echo "$perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr"
+done < $WORKLOADS
 
-# Pin KPart thread to core 15 (hyperthreading enabled)
-STARTTIME=$(($(date +%s%N)/1000000))
-
-numactl -C 2 ../src/kpart $perfCounters $phaseLen $logFile $warmupPeriod $profilingPeriod $processStr
-
-ENDTIME=$(($(date +%s%N)/1000000))
-echo "Elapsed time = $(($ENDTIME - $STARTTIME)) milliseconds."
-
-for pid in ${!appsArray[@]}; do
-	# Delete folders to store input files 
-	rm -r "p"$pid
-done
+echo 1200000 | tee /sys/devices/system/cpu/cpufreq/policy*/scaling_min_freq > /dev/null
 
