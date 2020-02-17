@@ -23,7 +23,7 @@ def main():
         wl_show_name = "-".join(wl)
         apps = wl_show_name.split("-")
         print(wl_show_name)
-        dfW =  pd.DataFrame(columns=['app','time_s','instructions:tot','cycles:tot','ipc'])
+        dfW =  pd.DataFrame(columns=['app','time_s','instructions:tot','cycles:tot','ipc','slowdown'])
 
         outputPath = args.outputdir + "/" + wl_show_name
 
@@ -32,12 +32,17 @@ def main():
             print(app)
             wl_in_path = args.inputdir + "/" + wl_show_name + "/perfCtrs." + str(appN)
             dfApp = pd.read_table(wl_in_path, sep=" ")
+            dfApp = dfApp[dfApp['INST_RETIRED'] <= 201005000000]
 
             dfW.loc[appN,'app'] = app
-            dfW.loc[appN,'time_s'] = dfApp['TIME_ELAPSED_MS'].sum()
-            dfW.loc[appN,'instructions:tot'] = dfApp['INST_RETIRED'].sum()
-            dfW.loc[appN,'cycles:tot'] = dfApp['UNHALTED_CORE_CYCLES'].sum()
-            dfW.loc[appN,'ipc'] = dfApp['INST_RETIRED'].sum() / dfApp['UNHALTED_CORE_CYCLES'].sum()
+            dfW.loc[appN,'time_s'] = dfApp['TIME_ELAPSED_MS'].sum() / 1000
+            dfW.loc[appN,'instructions:tot'] = dfApp['INST_RETIRED'].max()
+            dfW.loc[appN,'cycles:tot'] = dfApp['UNHALTED_CORE_CYCLES'].max()
+            dfW.loc[appN,'ipc'] = dfApp['INST_RETIRED'].max() / dfApp['UNHALTED_CORE_CYCLES'].max()
+
+            wl_alone = "/home/lupones/manager/experiments/TFM-TPDS/CPA_kpart_alone/data-agg/" + app + "_tot.csv"
+            dfAlone = pd.read_table(wl_alone, sep=",")
+            dfW.loc[appN,'slowdown'] = dfW.loc[appN,'time_s'] / (dfAlone['interval:mean'].max()/2)
 
             # save tables
             dfW.index.name = 'app_id'
